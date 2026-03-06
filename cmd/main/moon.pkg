@@ -1,0 +1,7 @@
+// import {
+//   "ryota0624/github_noti" @lib,
+// }
+
+options(
+  "is-main": true,
+)
