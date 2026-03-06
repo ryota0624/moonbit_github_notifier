@@ -1,6 +1,12 @@
-// import {
-//   "ryota0624/github_noti" @lib,
-// }
+import {
+  "ryota0624/github_noti" @lib,
+  "mizchi/x/process",
+  "mizchi/x/sys",
+  "mizchi/x/stdio",
+  "moonbitlang/async",
+  "moonbitlang/core/env",
+  "moonbitlang/core/cmp",
+}
 
 options(
   "is-main": true,

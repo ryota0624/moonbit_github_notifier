@@ -1,6 +1,10 @@
 {
   "name": "ryota0624/github_noti",
   "version": "0.1.0",
+  "deps": {
+    "mizchi/x": "0.1.5",
+    "moonbitlang/async": "0.16.6"
+  },
   "readme": "README.mbt.md",
   "repository": "",
   "license": "Apache-2.0",
