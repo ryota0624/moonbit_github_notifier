@@ -2,5 +2,6 @@ import {
   "mizchi/x/process",
   "mizchi/x/fs",
   "mizchi/x/sys",
+  "mizchi/tui",
   "moonbitlang/core/json",
 }

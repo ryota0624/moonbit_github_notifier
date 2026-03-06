@@ -1,7 +1,4 @@
 ///|
-let esc : String = "\u001b"
-
-///|
 async fn main {
   let args = @env.args()
   let repos : Array[String] = []
@@ -20,8 +17,21 @@ async fn main {
   fetch_all(state, repos)
   let read_ids = @lib.load_read_ids()
   @lib.mark_read_comments(state.comments, read_ids)
-  print_render(state)
+
+  // Setup terminal with mizchi/tui
+  let (width, height) = @tui.get_terminal_size()
+  let app = @tui.VNodeApp::new(width, height)
+
+  fn render_ui() -> @tui.TuiNode {
+    @lib.render_tui(state, width, height)
+  }
+
+  @tui.print_raw(@tui.VNodeApp::init_terminal())
+  @tui.enable_raw_mode()
+  @tui.print_raw(app.render_frame(render_ui()))
+
   @async.with_task_group(fn(tg) {
+    // Background refresh
     tg.spawn_bg(async fn() {
       for {
         @async.sleep(60000)
@@ -34,10 +44,100 @@ async fn main {
           let diff = new_count - old_count
           @lib.send_notification("GitHub PR Notifier", "\{diff} new comment(s)")
         }
-        print_render(state)
+        @tui.print_raw(app.render_frame(render_ui()))
       }
     })
-    tg.spawn_bg(async fn() { key_loop(state) })
+    // Key input loop
+    tg.spawn_bg(async fn() {
+      let mut running = true
+      while running {
+        let key = @tui.read_key()
+        if key.length() == 0 {
+          continue
+        }
+        let event = @tui.parse_input(key)
+        let mut need_render = true
+        match event {
+          @tui.InputEvent::Key(key_event) =>
+            match key_event {
+              @tui.KeyEvent::Char('q', @tui.KeyModifier::None) => {
+                let ids = @lib.collect_read_ids(state.comments)
+                @lib.save_read_ids(ids)
+                running = false
+              }
+              @tui.KeyEvent::Char('c', @tui.KeyModifier::Ctrl) => {
+                let ids = @lib.collect_read_ids(state.comments)
+                @lib.save_read_ids(ids)
+                running = false
+              }
+              @tui.KeyEvent::Char('j', _) => {
+                let visible = state.visible_comments()
+                if state.cursor < visible.length() - 1 {
+                  state.cursor = state.cursor + 1
+                }
+              }
+              @tui.KeyEvent::Char('k', _) => {
+                if state.cursor > 0 {
+                  state.cursor = state.cursor - 1
+                }
+              }
+              @tui.KeyEvent::Special(@tui.SpecialKey::Down, _) => {
+                let visible = state.visible_comments()
+                if state.cursor < visible.length() - 1 {
+                  state.cursor = state.cursor + 1
+                }
+              }
+              @tui.KeyEvent::Special(@tui.SpecialKey::Up, _) => {
+                if state.cursor > 0 {
+                  state.cursor = state.cursor - 1
+                }
+              }
+              @tui.KeyEvent::Char('r', @tui.KeyModifier::None) => {
+                let visible = state.visible_comments()
+                if state.cursor < visible.length() {
+                  let comment = visible[state.cursor]
+                  mark_comment_read(state, comment.id)
+                  let ids = @lib.collect_read_ids(state.comments)
+                  @lib.save_read_ids(ids)
+                }
+              }
+              @tui.KeyEvent::Char('R', _) => {
+                for i in 0..<state.comments.length() {
+                  state.comments[i] = { ..state.comments[i], read: true }
+                }
+                let ids = @lib.collect_read_ids(state.comments)
+                @lib.save_read_ids(ids)
+              }
+              @tui.KeyEvent::Char('o', _) => {
+                let visible = state.visible_comments()
+                if state.cursor < visible.length() {
+                  let comment = visible[state.cursor]
+                  let _ = @process.run(
+                    "gh",
+                    [
+                      "pr", "view", "--repo", comment.pr_repo,
+                      comment.pr_number.to_string(), "--web",
+                    ][:],
+                  )
+                }
+              }
+              @tui.KeyEvent::Char('f', _) => {
+                state.show_read = not(state.show_read)
+                state.cursor = 0
+              }
+              _ => need_render = false
+            }
+          _ => need_render = false
+        }
+        if need_render && running {
+          @tui.print_raw(app.render_frame(render_ui()))
+        }
+      }
+      // Cleanup terminal
+      @tui.cleanup_stdin()
+      @tui.print_raw(@tui.VNodeApp::restore_terminal())
+      @sys.exit(0)
+    })
   })
 }
 
@@ -54,11 +154,7 @@ async fn fetch_all(state : @lib.AppState, repos : Array[String]) -> Unit {
   let all_comments : Array[@lib.Comment] = []
   for pr in all_prs {
     let comments = @lib.gh_get_comments(
-      pr.repo,
-      pr.number,
-      pr.title,
-      pr.url,
-      state.my_login,
+      pr.repo, pr.number, pr.title, pr.url, state.my_login,
     )
     for c in comments {
       all_comments.push(c)
@@ -82,89 +178,10 @@ async fn fetch_all(state : @lib.AppState, repos : Array[String]) -> Unit {
 }
 
 ///|
-async fn key_loop(state : @lib.AppState) -> Unit {
-  let buf : FixedArray[Byte] = FixedArray::make(4, b'\x00')
-  for {
-    let n = @stdio.stdin.read(buf)
-    if n <= 0 {
-      continue
-    }
-    let ch = buf[0]
-    match ch {
-      b'q' => {
-        let ids = @lib.collect_read_ids(state.comments)
-        @lib.save_read_ids(ids)
-        println("\{esc}[2J\{esc}[H")
-        @sys.exit(0)
-      }
-      b'j' => {
-        let visible = state.visible_comments()
-        if state.cursor < visible.length() - 1 {
-          state.cursor = state.cursor + 1
-        }
-        print_render(state)
-      }
-      b'k' => {
-        if state.cursor > 0 {
-          state.cursor = state.cursor - 1
-        }
-        print_render(state)
-      }
-      b'r' => {
-        let visible = state.visible_comments()
-        if state.cursor < visible.length() {
-          let comment = visible[state.cursor]
-          mark_comment_read(state, comment.id)
-          let ids = @lib.collect_read_ids(state.comments)
-          @lib.save_read_ids(ids)
-          print_render(state)
-        }
-      }
-      b'R' => {
-        for i in 0..<state.comments.length() {
-          state.comments[i] = { ..state.comments[i], read: true }
-        }
-        let ids = @lib.collect_read_ids(state.comments)
-        @lib.save_read_ids(ids)
-        print_render(state)
-      }
-      b'o' => {
-        let visible = state.visible_comments()
-        if state.cursor < visible.length() {
-          let comment = visible[state.cursor]
-          let _ = @process.run(
-            "gh",
-            [
-              "pr",
-              "view",
-              "--repo",
-              comment.pr_repo,
-              comment.pr_number.to_string(),
-              "--web",
-            ][:],
-          )
-        }
-      }
-      b'f' => {
-        state.show_read = not(state.show_read)
-        state.cursor = 0
-        print_render(state)
-      }
-      _ => ()
-    }
-  }
-}
-
-///|
 fn mark_comment_read(state : @lib.AppState, id : Int64) -> Unit {
   for i in 0..<state.comments.length() {
     if state.comments[i].id == id {
       state.comments[i] = { ..state.comments[i], read: true }
     }
   }
-}
-
-///|
-fn print_render(state : @lib.AppState) -> Unit raise {
-  println(@lib.render(state))
 }

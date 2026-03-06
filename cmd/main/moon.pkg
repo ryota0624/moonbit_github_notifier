@@ -2,7 +2,7 @@ import {
   "ryota0624/github_noti" @lib,
   "mizchi/x/process",
   "mizchi/x/sys",
-  "mizchi/x/stdio",
+  "mizchi/tui",
   "moonbitlang/async",
   "moonbitlang/core/env",
   "moonbitlang/core/cmp",
@@ -10,4 +10,5 @@ import {
 
 options(
   "is-main": true,
+  link: { "native": { "cc-link-flags": ".mooncakes/mizchi/tui/src/io/tui_native.c" } },
 )
