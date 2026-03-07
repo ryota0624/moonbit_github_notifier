@@ -7,6 +7,9 @@ pub fn render_tui(
   let unread = state.unread_count()
   let visible = state.visible_comments()
   let filter_label = if state.show_read { "all" } else { "unread only" }
+  // Header: 3 lines (margin+text+margin), Footer: 3 lines, Border: 2 lines
+  let list_height = height - 8
+  state.adjust_scroll(list_height)
   @tui.view(
     width=width.to_double(),
     height=height.to_double(),
@@ -25,7 +28,7 @@ pub fn render_tui(
       @tui.column(
         flex_grow=1.0,
         padding_x=1.0,
-        render_comment_list(visible, state.cursor),
+        render_comment_list(visible, state.cursor, state.scroll_offset, list_height),
       ),
       // Footer
       @tui.row(justify="center", padding_y=1.0, [
@@ -42,39 +45,82 @@ pub fn render_tui(
 fn render_comment_list(
   visible : Array[Comment],
   cursor : Int,
+  scroll_offset : Int,
+  max_lines : Int,
 ) -> Array[@tui.TuiNode] {
   if visible.is_empty() {
     return [@tui.text("  No comments.")]
   }
   let nodes : Array[@tui.TuiNode] = []
   let mut current_pr = ""
+  let mut line_count = 0
   for i, c in visible {
     let pr_key = "\{c.pr_repo}#\{c.pr_number}"
-    if pr_key != current_pr {
+    let is_new_pr = pr_key != current_pr
+    if is_new_pr {
       current_pr = pr_key
+      // PR header takes lines: separator (if not first) + title
       if i > 0 {
+        line_count += 1 // vspace
+      }
+      line_count += 1 // PR title
+    }
+    line_count += 1 // comment line
+    // Skip lines before scroll_offset
+    if line_count <= scroll_offset {
+      continue
+    }
+    // Stop if we've filled the visible area
+    if line_count > scroll_offset + max_lines {
+      break
+    }
+    // Render PR header if this is the first visible item of a new PR group
+    if is_new_pr {
+      if nodes.length() > 0 {
         nodes.push(@tui.vspace(1.0))
       }
       nodes.push(
-        @tui.text(
-          "\{c.pr_repo} #\{c.pr_number}: \{c.pr_title}",
-          fg="white",
-          bold=true,
-        ),
+        @tui.row([
+          @tui.text("\{c.pr_repo}", fg="cyan", bold=true),
+          @tui.text(" #\{c.pr_number} ", fg="yellow"),
+          @tui.text(c.pr_title, fg="white", bold=true),
+        ]),
       )
     }
-    let marker = if c.read { " " } else { "*" }
     let cursor_mark = if i == cursor { ">" } else { " " }
     let preview = truncate_str(c.body.replace_all(old="\n", new=" "), 50)
-    let line = "\{cursor_mark} \{marker} @\{c.author}  \{c.created_at}  \"\{preview}\""
     if i == cursor {
+      // Selected row
       nodes.push(
-        @tui.row(bg="white", [
-          @tui.text(line, fg="black", bold=true),
+        @tui.row(bg="rgb(60,60,80)", [
+          @tui.text("\{cursor_mark} ", fg="yellow", bold=true),
+          if c.read {
+            @tui.text("  ", fg="rgb(80,80,80)")
+          } else {
+            @tui.text("* ", fg="red", bold=true)
+          },
+          @tui.text("@\{c.author}", fg="cyan", bold=true),
+          @tui.text("  \{c.created_at}  ", fg="rgb(180,180,180)"),
+          @tui.text("\"\{preview}\"", fg="white", bold=true),
         ]),
       )
     } else {
-      nodes.push(@tui.text(line))
+      // Normal row
+      let author_color = if c.read { "rgb(100,100,100)" } else { "green" }
+      let body_color = if c.read { "rgb(80,80,80)" } else { "white" }
+      nodes.push(
+        @tui.row([
+          @tui.text("\{cursor_mark} ", fg="white"),
+          if c.read {
+            @tui.text("  ", fg="rgb(80,80,80)")
+          } else {
+            @tui.text("* ", fg="red", bold=true)
+          },
+          @tui.text("@\{c.author}", fg=author_color),
+          @tui.text("  \{c.created_at}  ", fg="rgb(100,100,100)"),
+          @tui.text("\"\{preview}\"", fg=body_color),
+        ]),
+      )
     }
   }
   nodes

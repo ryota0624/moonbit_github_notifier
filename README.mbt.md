@@ -11,25 +11,60 @@
 ## ビルド
 
 ```bash
-moon build --target native
+moon build --target js
 ```
-
-バイナリは `_build/native/debug/build/cmd/main/main.exe` に生成されます。
 
 ## 実行
 
 ```bash
-# moon run 経由
-moon run cmd/main --target native -- owner/repo
+# 基本的な使い方
+moon run cmd/main --target js -- owner/repo
 
 # 複数リポジトリを監視
-moon run cmd/main --target native -- owner/repo1 owner/repo2
+moon run cmd/main --target js -- owner/repo1 owner/repo2
 
-# ビルド済みバイナリを直接実行
-./_build/native/debug/build/cmd/main/main.exe owner/repo
+# cmux notify で通知（osascript の代わり）
+moon run cmd/main --target js -- --cmux owner/repo
 ```
 
 引数に監視したいリポジトリを `owner/repo` 形式で指定します。
+
+## オプション
+
+| フラグ | 説明 |
+|--------|------|
+| `--cmux` | 通知に `cmux notify` コマンドを使用（デフォルトは osascript） |
+| `--dump <file>` | GitHub APIから取得したデータをJSONファイルに保存 |
+| `--load <file>` | JSONファイルからデータを読み込んで表示（GitHub API不要） |
+| `--exclude <file>` | 除外パターンファイルを指定（表示・通知の両方に適用） |
+| `--interval <sec>` | ポーリング間隔を秒で指定（デフォルト: 60） |
+
+### データのダンプとロード
+
+動作検証やオフラインでの確認に便利です。
+
+```bash
+# GitHub APIからデータを取得しつつファイルに保存
+moon run cmd/main --target js -- --dump data.json owner/repo
+
+# 保存したファイルからTUIを起動（GitHub API不要、リポジトリ引数も不要）
+moon run cmd/main --target js -- --load data.json
+```
+
+### 除外パターン
+
+テキストファイルに1行ずつ除外パターンを記述します。コメントの `author` または `body` にパターンが含まれていれば、表示と通知の両方から除外されます。`#` で始まる行はコメントとして無視されます。
+
+```
+# exclude.txt の例
+dependabot
+[bot]
+codecov
+```
+
+```bash
+moon run cmd/main --target js -- --exclude exclude.txt owner/repo
+```
 
 ## 通知対象
 
@@ -43,32 +78,13 @@ moon run cmd/main --target native -- owner/repo1 owner/repo2
 
 | キー | 操作 |
 |------|------|
-| `j` | カーソルを下に移動 |
-| `k` | カーソルを上に移動 |
+| `j` / `↓` | カーソルを下に移動 |
+| `k` / `↑` | カーソルを上に移動 |
 | `r` | 選択中のコメントを既読にする |
 | `R` | 全コメントを既読にする |
 | `o` | 選択中のコメントのPRをブラウザで開く |
 | `f` | 表示切替（全て / 未読のみ） |
-| `q` | 終了 |
-
-## 画面イメージ
-
-```
-GitHub PR Notifier                    [3 unread] [all]
-──────────────────────────────────────────────────────────────────
- owner/repo #42: Fix login bug
-> * @alice  2025-01-01T12:00:00Z  "LGTMです、1点だけ修正お願いします"
-    @bob   2025-01-01T11:00:00Z  "テスト追加しました"
-
- owner/repo #38: Add dark mode
-  * @carol  2025-01-01T10:00:00Z  "このアプローチで進めてよいですか？"
-
-──────────────────────────────────────────────────────────────────
- j/k:move  r:read  R:read all  o:open  f:filter  q:quit
-```
-
-- `*` は未読コメント
-- `>` はカーソル位置（反転表示）
+| `q` / `Ctrl+C` | 終了 |
 
 ## データ保存
 
@@ -76,9 +92,4 @@ GitHub PR Notifier                    [3 unread] [all]
 
 ## ポーリング
 
-起動後、60秒間隔でGitHub APIをポーリングし、新規コメントがあればmacOSのデスクトップ通知を表示します。
-
-## 既知の制限
-
-- ターミナルのrawモードが未実装のため、キー入力後にEnterキーを押す必要があります
-- ポーリング間隔は現在固定（60秒）です
+起動後、60秒間隔でGitHub APIをポーリングし、新規コメントがあればデスクトップ通知を表示します。

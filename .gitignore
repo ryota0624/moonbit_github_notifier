@@ -2,3 +2,5 @@
 _build/
 .mooncakes/
 .moonagent/
+comments.json
+exclude.txt

@@ -1,11 +1,14 @@
 import {
   "ryota0624/github_noti" @lib,
   "mizchi/x/process",
+  "mizchi/x/fs",
   "mizchi/x/sys",
   "mizchi/tui",
+  "mizchi/tui/io" @tui_io,
   "moonbitlang/async",
   "moonbitlang/core/env",
   "moonbitlang/core/cmp",
+  "moonbitlang/core/strconv",
 }
 
 options(
