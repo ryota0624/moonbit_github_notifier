@@ -11,23 +11,23 @@
 ## ビルド
 
 ```bash
-moon build --target js
+moon build
 ```
 
 ## 実行
 
 ```bash
 # 基本的な使い方
-moon run cmd/main --target js -- owner/repo
+moon run cmd/main -- owner/repo
 
 # 複数リポジトリを監視
-moon run cmd/main --target js -- owner/repo1 owner/repo2
+moon run cmd/main -- owner/repo1 owner/repo2
 
 # cmux notify で通知（osascript の代わり）
-moon run cmd/main --target js -- --cmux owner/repo
+moon run cmd/main -- --cmux owner/repo
 
 # 30秒間隔で監視
-moon run cmd/main --target js -- --interval 30 owner/repo
+moon run cmd/main -- --interval 30 owner/repo
 ```
 
 引数に監視したいリポジトリを `owner/repo` 形式で指定します。
@@ -48,10 +48,10 @@ moon run cmd/main --target js -- --interval 30 owner/repo
 
 ```bash
 # GitHub APIからデータを取得しつつファイルに保存
-moon run cmd/main --target js -- --dump data.json owner/repo
+moon run cmd/main -- --dump data.json owner/repo
 
 # 保存したファイルから起動（GitHub API不要、リポジトリ引数も不要）
-moon run cmd/main --target js -- --load data.json
+moon run cmd/main -- --load data.json
 ```
 
 ### 除外パターン
@@ -66,7 +66,7 @@ codecov
 ```
 
 ```bash
-moon run cmd/main --target js -- --exclude exclude.txt owner/repo
+moon run cmd/main -- --exclude exclude.txt owner/repo
 ```
 
 ## 通知対象
@@ -101,7 +101,7 @@ moon run cmd/main --target js -- --exclude exclude.txt owner/repo
 環境変数 `DEBUG=true` で詳細ログを出力します。
 
 ```bash
-DEBUG=true moon run cmd/main --target js -- owner/repo
+DEBUG=true moon run cmd/main -- owner/repo
 ```
 
 ## データ保存

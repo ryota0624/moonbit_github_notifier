@@ -39,7 +39,7 @@ async fn main {
     let data = @fs.read_file(load_file)
     @lib.load_state_from_json(data.text(), state)
     state.comments = @lib.filter_comments(state.comments, exclude_patterns)
-    println("Loaded \{state.comments.length()} comments from \{load_file}")
+    log_info("loaded \{state.comments.length()} comments from \{load_file}")
   } else {
     if repos.is_empty() {
       println(
@@ -48,18 +48,62 @@ async fn main {
       @sys.exit(1)
     }
     state.my_login = @lib.gh_get_my_login()
-    println("Logged in as: \{state.my_login}")
-    println("Watching: \{repos}")
-    println("Fetching PRs...")
+    log_info("logged in as \{state.my_login}")
+    log_info("watching \{repos}")
+    log_info("fetching PRs...")
     fetch_all(state, repos, exclude_patterns)
     if dump_file.length() > 0 {
       @fs.write_file(dump_file, @lib.dump_state_json(state))
-      println("Dumped state to \{dump_file}")
+      log_info("dumped state to \{dump_file}")
     }
   }
   let read_ids = @lib.load_read_ids()
   @lib.mark_read_comments(state.comments, read_ids)
   run_watch(state, repos, exclude_patterns, use_cmux, interval_sec)
+}
+
+///|
+fn is_debug() -> Bool {
+  match @sys.get_env_var("DEBUG") {
+    Some("true") | Some("1") => true
+    _ => false
+  }
+}
+
+///|
+fn log_info(msg : String) -> Unit {
+  println("[info] \{msg}")
+}
+
+///|
+fn log_debug(msg : String) -> Unit {
+  if is_debug() {
+    println("[debug] \{msg}")
+  }
+}
+
+///|
+fn log_event_block(
+  new_comments : Array[@lib.Comment],
+  missed : Array[@lib.MissedReply],
+) -> Unit {
+  let total = new_comments.length() + missed.length()
+  if total == 0 {
+    return
+  }
+  println("--- \{total} updates ---")
+  for c in new_comments {
+    println("  [new_comment] \{c.pr_repo}#\{c.pr_number} @\{c.author}")
+    println("    \{c.notifiable_comment()}")
+    println("    \u001b[32m\{c.html_url}\u001b[0m")
+  }
+  for m in missed {
+    let c = m.comment
+    println("  [reply_needed] \{c.pr_repo}#\{c.pr_number} @\{c.author}")
+    println("    \{c.notifiable_comment()}")
+    println("    \u001b[32m\{c.html_url}\u001b[0m")
+  }
+  println("---")
 }
 
 ///|
@@ -70,14 +114,17 @@ async fn run_watch(
   use_cmux : Bool,
   interval_sec : Int,
 ) -> Unit {
-  println("Watching for new comments (interval: \{interval_sec}s)...")
+  log_info("watching (interval: \{interval_sec}s)")
   let notified_missed_ids : Map[Int64, Bool] = {}
+  let unread : Array[@lib.Comment] = []
   for c in state.comments {
     if not(c.read) {
-      println("\{c.pr_repo}#\{c.pr_number} @\{c.author}")
+      unread.push(c)
     }
   }
-  check_and_notify_missed(state, use_cmux, notified_missed_ids)
+  let initial_missed = collect_missed(state, notified_missed_ids)
+  log_event_block(unread, initial_missed)
+  send_notification(unread, initial_missed, use_cmux)
   for {
     @async.sleep(interval_sec * 1000)
     let old_ids : Map[Int64, Bool] = {}
@@ -85,33 +132,20 @@ async fn run_watch(
       old_ids[c.id] = true
     }
     fetch_all(state, repos, exclude_patterns)
-    let debug = match @sys.get_env_var("DEBUG") {
-      Some("true") | Some("1") => true
-      _ => false
-    }
-    if debug {
-      println("[DEBUG] polled \{state.comments.length()} comments")
-    }
+    log_debug("polled \{state.comments.length()} comments")
     let loaded_ids = @lib.load_read_ids()
     @lib.mark_read_comments(state.comments, loaded_ids)
+    let new_items : Array[@lib.Comment] = []
     for c in state.comments {
       if not(old_ids.contains(c.id)) {
-        println(
-          "new comment: \{c.pr_repo}#\{c.pr_number} @\{c.author}: \{c.notifiable_comment()}",
-        )
-        let title = "\{c.pr_repo}#\{c.pr_number} @\{c.author}"
-        if use_cmux {
-          @lib.send_notification_cmux(title, c.notifiable_comment())
-        } else {
-          @lib.send_notification_osascript(title, c.notifiable_comment())
-        }
-      } else if debug {
-        println(
-          "[DEBUG] skipped (known): \{c.pr_repo}#\{c.pr_number} @\{c.author}: \{c.notifiable_comment()}",
-        )
+        new_items.push(c)
+      } else {
+        log_debug("skipped (known): \{c.pr_repo}#\{c.pr_number} @\{c.author}")
       }
     }
-    check_and_notify_missed(state, use_cmux, notified_missed_ids)
+    let missed_items = collect_missed(state, notified_missed_ids)
+    log_event_block(new_items, missed_items)
+    send_notification(new_items, missed_items, use_cmux)
   }
 }
 
@@ -177,43 +211,58 @@ async fn fetch_all_comments_for_missed(
 }
 
 ///|
-async fn check_and_notify_missed(
+async fn collect_missed(
   state : @lib.AppState,
-  use_cmux : Bool,
   notified_missed_ids : Map[Int64, Bool],
-) -> Unit {
+) -> Array[@lib.MissedReply] {
   let all_comments = fetch_all_comments_for_missed(state)
   let missed = @lib.detect_missed_replies(
     all_comments,
     state.pull_requests,
     state.my_login,
   )
-  let debug = match @sys.get_env_var("DEBUG") {
-    Some("true") | Some("1") => true
-    _ => false
-  }
+  let result : Array[@lib.MissedReply] = []
   for m in missed {
     let c = m.comment
     if notified_missed_ids.contains(c.id) {
-      if debug {
-        println(
-          "[DEBUG] skipped (already notified): \{c.pr_repo}#\{c.pr_number} @\{c.author}:\n ● \{c.notifiable_comment()}",
-        )
-      }
+      log_debug(
+        "skipped (already notified): \{c.pr_repo}#\{c.pr_number} @\{c.author}",
+      )
       continue
     }
     notified_missed_ids[c.id] = true
-    if debug {
-      println(
-        "[DEBUG] missed reply (\{m.reason}): \{c.pr_repo}#\{c.pr_number} @\{c.author}:\n ● \{c.notifiable_comment()}",
-      )
-    }
-    let title = "Reply needed: \{c.pr_repo}#\{c.pr_number}"
-    let body = "@\{c.author}: \{c.notifiable_comment()}"
-    if use_cmux {
-      @lib.send_notification_cmux(title, body)
-    } else {
-      @lib.send_notification_osascript(title, body)
-    }
+    result.push(m)
+  }
+  result
+}
+
+///|
+async fn send_notification(
+  new_comments : Array[@lib.Comment],
+  missed : Array[@lib.MissedReply],
+  use_cmux : Bool,
+) -> Unit {
+  if new_comments.length() == 0 && missed.length() == 0 {
+    return
+  }
+  let lines : Array[String] = []
+  for c in new_comments {
+    lines.push(
+      "\{c.pr_repo}#\{c.pr_number} @\{c.author}: \{c.notifiable_comment()}\n  \{c.html_url}",
+    )
+  }
+  for m in missed {
+    let c = m.comment
+    lines.push(
+      "[reply needed] \{c.pr_repo}#\{c.pr_number} @\{c.author}: \{c.notifiable_comment()}\n  \{c.html_url}",
+    )
+  }
+  let total = new_comments.length() + missed.length()
+  let title = "github_noti: \{total} new"
+  let body = lines.join("\n")
+  if use_cmux {
+    @lib.send_notification_cmux(title, body)
+  } else {
+    @lib.send_notification_osascript(title, body)
   }
 }

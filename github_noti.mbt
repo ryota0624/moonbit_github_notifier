@@ -30,6 +30,7 @@ pub(all) struct Comment {
   pr_number : Int
   pr_title : String
   pr_url : String
+  html_url : String
   author : String
   body : String
   created_at : String
@@ -71,6 +72,7 @@ pub fn comment_to_json(c : Comment) -> Json {
     "pr_number": c.pr_number.to_double(),
     "pr_title": c.pr_title,
     "pr_url": c.pr_url,
+    "html_url": c.html_url,
     "author": c.author,
     "body": c.body,
     "created_at": c.created_at,
@@ -96,12 +98,17 @@ pub fn comment_from_json(json : Json) -> Comment? {
         { "read": True, .. } => true
         _ => false
       }
+      let html_url = match json {
+        { "html_url": String(u), .. } => u
+        _ => ""
+      }
       Some({
         id: id.to_int64(),
         pr_repo,
         pr_number: pr_number.to_int(),
         pr_title,
         pr_url,
+        html_url,
         author,
         body,
         created_at,

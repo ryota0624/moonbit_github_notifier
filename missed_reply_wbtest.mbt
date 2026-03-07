@@ -12,6 +12,7 @@ fn make_comment(
     pr_number,
     pr_title: "test PR",
     pr_url: "",
+    html_url: "",
     author,
     body: "comment by \{author}",
     created_at,

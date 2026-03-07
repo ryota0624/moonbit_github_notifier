@@ -1,9 +1,10 @@
 ///|
 pub async fn gh_exec(args : Array[String]) -> String {
-  let (code, stdout) = @process.collect_stdout("gh", args[:])
+  let (code, stdout, stderr) = @process.collect_output("gh", args[:])
   let text = stdout.text()
   if code != 0 {
-    raise GhError("gh command failed with exit code \{code}")
+    let err = stderr.text()
+    raise GhError("gh \{args}: exit code \{code}: \{err}")
   }
   text
 }
@@ -11,6 +12,13 @@ pub async fn gh_exec(args : Array[String]) -> String {
 ///|
 pub suberror GhError {
   GhError(String)
+}
+
+///|
+pub impl Show for GhError with output(self, logger) {
+  match self {
+    GhError(msg) => logger.write_string("GhError: \{msg}")
+  }
 }
 
 ///|
@@ -171,12 +179,17 @@ fn parse_all_comments(
               Some(String(s)) => s
               _ => ""
             }
+            let html_url = match obj.get("html_url") {
+              Some(String(s)) => s
+              _ => ""
+            }
             out.push({
               id,
               pr_repo,
               pr_number,
               pr_title,
               pr_url,
+              html_url,
               author,
               body,
               created_at,
@@ -228,12 +241,17 @@ fn parse_comments(
               Some(String(s)) => s
               _ => ""
             }
+            let html_url = match obj.get("html_url") {
+              Some(String(s)) => s
+              _ => ""
+            }
             out.push({
               id,
               pr_repo,
               pr_number,
               pr_title,
               pr_url,
+              html_url,
               author,
               body,
               created_at,
