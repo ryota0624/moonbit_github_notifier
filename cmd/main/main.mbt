@@ -22,7 +22,7 @@ async fn main {
       exclude_file = args[i]
     } else if args[i] == "--interval" && i + 1 < args.length() {
       i += 1
-      interval_sec = try { @strconv.parse_int(args[i]) } catch { _ => 60 }
+      interval_sec = @strconv.parse_int(args[i]) catch { _ => 60 }
     } else {
       repos.push(args[i])
     }
@@ -36,7 +36,6 @@ async fn main {
   }
   let state = @lib.AppState::new()
   if load_file.length() > 0 {
-    // Load from file instead of fetching from GitHub
     let data = @fs.read_file(load_file)
     @lib.load_state_from_json(data.text(), state)
     state.comments = @lib.filter_comments(state.comments, exclude_patterns)
@@ -44,7 +43,7 @@ async fn main {
   } else {
     if repos.is_empty() {
       println(
-        "Usage: github_noti [--cmux] [--dump <file>] [--load <file>] [--exclude <file>] <owner/repo> [...]",
+        "Usage: github_noti [--cmux] [--dump <file>] [--load <file>] [--exclude <file>] [--interval <sec>] <owner/repo> [...]",
       )
       @sys.exit(1)
     }
@@ -60,149 +59,60 @@ async fn main {
   }
   let read_ids = @lib.load_read_ids()
   @lib.mark_read_comments(state.comments, read_ids)
+  run_watch(state, repos, exclude_patterns, use_cmux, interval_sec)
+}
 
-  // Setup terminal with mizchi/tui
-  let (init_w, init_h) = @tui.get_terminal_size()
-  let cur_width : Ref[Int] = { val: init_w }
-  let cur_height : Ref[Int] = { val: init_h }
-  let app = @tui.VNodeApp::new(init_w, init_h)
-
-  fn render_ui() -> @tui.TuiNode {
-    @lib.render_tui(state, cur_width.val, cur_height.val)
+///|
+async fn run_watch(
+  state : @lib.AppState,
+  repos : Array[String],
+  exclude_patterns : Array[String],
+  use_cmux : Bool,
+  interval_sec : Int,
+) -> Unit {
+  println("Watching for new comments (interval: \{interval_sec}s)...")
+  let notified_missed_ids : Map[Int64, Bool] = {}
+  for c in state.comments {
+    if not(c.read) {
+      println("\{c.pr_repo}#\{c.pr_number} @\{c.author}")
+    }
   }
-
-  @tui.print_raw(@tui.VNodeApp::init_terminal())
-  @tui.enable_raw_mode()
-  @tui.print_raw(app.render_frame(render_ui()))
-
-  // Listen for terminal resize
-  @tui_io.start_resize_listener(fn(w, h) {
-    cur_width.val = w
-    cur_height.val = h
-    app.resize(w, h)
-    @tui.print_raw(app.render_frame(render_ui()))
-  })
-
-  @async.with_task_group(fn(tg) {
-    // Background refresh
-    tg.spawn_bg(async fn() {
-      for {
-        @async.sleep(interval_sec * 1000)
-        let old_ids : Map[Int64, Bool] = {}
-        for c in state.comments {
-          old_ids[c.id] = true
+  check_and_notify_missed(state, use_cmux, notified_missed_ids)
+  for {
+    @async.sleep(interval_sec * 1000)
+    let old_ids : Map[Int64, Bool] = {}
+    for c in state.comments {
+      old_ids[c.id] = true
+    }
+    fetch_all(state, repos, exclude_patterns)
+    let debug = match @sys.get_env_var("DEBUG") {
+      Some("true") | Some("1") => true
+      _ => false
+    }
+    if debug {
+      println("[DEBUG] polled \{state.comments.length()} comments")
+    }
+    let loaded_ids = @lib.load_read_ids()
+    @lib.mark_read_comments(state.comments, loaded_ids)
+    for c in state.comments {
+      if not(old_ids.contains(c.id)) {
+        println(
+          "new comment: \{c.pr_repo}#\{c.pr_number} @\{c.author}: \{c.notifiable_comment()}",
+        )
+        let title = "\{c.pr_repo}#\{c.pr_number} @\{c.author}"
+        if use_cmux {
+          @lib.send_notification_cmux(title, c.notifiable_comment())
+        } else {
+          @lib.send_notification_osascript(title, c.notifiable_comment())
         }
-        fetch_all(state, repos, exclude_patterns)
-        let loaded_ids = @lib.load_read_ids()
-        @lib.mark_read_comments(state.comments, loaded_ids)
-        for c in state.comments {
-          if not(old_ids.contains(c.id)) {
-            let title = "\{c.pr_repo}#\{c.pr_number} @\{c.author}"
-            let body = c.body
-            if use_cmux {
-              @lib.send_notification_cmux(title, body)
-            } else {
-              @lib.send_notification_osascript(title, body)
-            }
-          }
-        }
-        @tui.print_raw(app.render_frame(render_ui()))
+      } else if debug {
+        println(
+          "[DEBUG] skipped (known): \{c.pr_repo}#\{c.pr_number} @\{c.author}: \{c.notifiable_comment()}",
+        )
       }
-    })
-    // Key input loop
-    tg.spawn_bg(async fn() {
-      let mut running = true
-      while running {
-        let key = @tui.read_key()
-        if key.length() == 0 {
-          continue
-        }
-        let event = @tui.parse_input(key)
-        let mut need_render = true
-        match event {
-          @tui.InputEvent::Key(key_event) =>
-            match key_event {
-              @tui.KeyEvent::Char('q', @tui.KeyModifier::None) => {
-                let ids = @lib.collect_read_ids(state.comments)
-                @lib.save_read_ids(ids)
-                running = false
-              }
-              @tui.KeyEvent::Char('c', @tui.KeyModifier::Ctrl) => {
-                let ids = @lib.collect_read_ids(state.comments)
-                @lib.save_read_ids(ids)
-                running = false
-              }
-              @tui.KeyEvent::Char('j', _) => {
-                let visible = state.visible_comments()
-                if state.cursor < visible.length() - 1 {
-                  state.cursor = state.cursor + 1
-                }
-              }
-              @tui.KeyEvent::Char('k', _) =>
-                if state.cursor > 0 {
-                  state.cursor = state.cursor - 1
-                }
-              @tui.KeyEvent::Special(@tui.SpecialKey::Down, _) => {
-                let visible = state.visible_comments()
-                if state.cursor < visible.length() - 1 {
-                  state.cursor = state.cursor + 1
-                }
-              }
-              @tui.KeyEvent::Special(@tui.SpecialKey::Up, _) =>
-                if state.cursor > 0 {
-                  state.cursor = state.cursor - 1
-                }
-              @tui.KeyEvent::Char('r', @tui.KeyModifier::None) => {
-                let visible = state.visible_comments()
-                if state.cursor < visible.length() {
-                  let comment = visible[state.cursor]
-                  mark_comment_read(state, comment.id)
-                  let ids = @lib.collect_read_ids(state.comments)
-                  @lib.save_read_ids(ids)
-                }
-              }
-              @tui.KeyEvent::Char('R', _) => {
-                for i in 0..<state.comments.length() {
-                  state.comments[i] = { ..state.comments[i], read: true }
-                }
-                let ids = @lib.collect_read_ids(state.comments)
-                @lib.save_read_ids(ids)
-              }
-              @tui.KeyEvent::Char('o', _) => {
-                let visible = state.visible_comments()
-                if state.cursor < visible.length() {
-                  let comment = visible[state.cursor]
-                  let _ = @process.run(
-                    "gh",
-                    [
-                      "pr",
-                      "view",
-                      "--repo",
-                      comment.pr_repo,
-                      comment.pr_number.to_string(),
-                      "--web",
-                    ][:],
-                  )
-                }
-              }
-              @tui.KeyEvent::Char('f', _) => {
-                state.show_read = not(state.show_read)
-                state.cursor = 0
-              }
-              _ => need_render = false
-            }
-          _ => need_render = false
-        }
-        if need_render && running {
-          @tui.print_raw(app.render_frame(render_ui()))
-        }
-      }
-      // Cleanup terminal
-      @tui.cleanup_stdin()
-      @tui.print_raw(@tui.VNodeApp::restore_terminal())
-      @sys.exit(0)
-    })
-  })
+    }
+    check_and_notify_missed(state, use_cmux, notified_missed_ids)
+  }
 }
 
 ///|
@@ -245,16 +155,65 @@ async fn fetch_all(
   }
   let filtered = @lib.filter_comments(all_comments, exclude_patterns)
   state.comments = filtered
-  if state.cursor >= filtered.length() {
-    state.cursor = @cmp.maximum(0, filtered.length() - 1)
-  }
 }
 
 ///|
-fn mark_comment_read(state : @lib.AppState, id : Int64) -> Unit {
-  for i in 0..<state.comments.length() {
-    if state.comments[i].id == id {
-      state.comments[i] = { ..state.comments[i], read: true }
+async fn fetch_all_comments_for_missed(
+  state : @lib.AppState,
+) -> Array[@lib.Comment] {
+  let all : Array[@lib.Comment] = []
+  for pr in state.pull_requests {
+    let comments = @lib.gh_get_all_comments(
+      pr.repo,
+      pr.number,
+      pr.title,
+      pr.url,
+    )
+    for c in comments {
+      all.push(c)
+    }
+  }
+  all
+}
+
+///|
+async fn check_and_notify_missed(
+  state : @lib.AppState,
+  use_cmux : Bool,
+  notified_missed_ids : Map[Int64, Bool],
+) -> Unit {
+  let all_comments = fetch_all_comments_for_missed(state)
+  let missed = @lib.detect_missed_replies(
+    all_comments,
+    state.pull_requests,
+    state.my_login,
+  )
+  let debug = match @sys.get_env_var("DEBUG") {
+    Some("true") | Some("1") => true
+    _ => false
+  }
+  for m in missed {
+    let c = m.comment
+    if notified_missed_ids.contains(c.id) {
+      if debug {
+        println(
+          "[DEBUG] skipped (already notified): \{c.pr_repo}#\{c.pr_number} @\{c.author}:\n ● \{c.notifiable_comment()}",
+        )
+      }
+      continue
+    }
+    notified_missed_ids[c.id] = true
+    if debug {
+      println(
+        "[DEBUG] missed reply (\{m.reason}): \{c.pr_repo}#\{c.pr_number} @\{c.author}:\n ● \{c.notifiable_comment()}",
+      )
+    }
+    let title = "Reply needed: \{c.pr_repo}#\{c.pr_number}"
+    let body = "@\{c.author}: \{c.notifiable_comment()}"
+    if use_cmux {
+      @lib.send_notification_cmux(title, body)
+    } else {
+      @lib.send_notification_osascript(title, body)
     }
   }
 }

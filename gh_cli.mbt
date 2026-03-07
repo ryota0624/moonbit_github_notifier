@@ -123,6 +123,74 @@ pub async fn gh_get_comments(
 }
 
 ///|
+pub async fn gh_get_all_comments(
+  repo : String,
+  pr_number : Int,
+  pr_title : String,
+  pr_url : String,
+) -> Array[Comment] {
+  let comments : Array[Comment] = []
+  let review_json = gh_api("repos/\{repo}/pulls/\{pr_number}/comments")
+  parse_all_comments(review_json, repo, pr_number, pr_title, pr_url, comments)
+  let issue_json = gh_api("repos/\{repo}/issues/\{pr_number}/comments")
+  parse_all_comments(issue_json, repo, pr_number, pr_title, pr_url, comments)
+  comments
+}
+
+///|
+fn parse_all_comments(
+  json : Json,
+  pr_repo : String,
+  pr_number : Int,
+  pr_title : String,
+  pr_url : String,
+  out : Array[Comment],
+) -> Unit {
+  match json {
+    Array(items) =>
+      for item in items {
+        match item {
+          Object(obj) => {
+            let author = match obj.get("user") {
+              Some(Object(user)) =>
+                match user.get("login") {
+                  Some(String(s)) => s
+                  _ => continue
+                }
+              _ => continue
+            }
+            let id : Int64 = match obj.get("id") {
+              Some(Number(n, ..)) => n.to_int64()
+              _ => continue
+            }
+            let body = match obj.get("body") {
+              Some(String(s)) => s
+              _ => ""
+            }
+            let created_at = match obj.get("created_at") {
+              Some(String(s)) => s
+              _ => ""
+            }
+            out.push({
+              id,
+              pr_repo,
+              pr_number,
+              pr_title,
+              pr_url,
+              author,
+              body,
+              created_at,
+              read: false,
+            })
+          }
+          _ => ()
+        }
+      }
+    _ => ()
+  }
+}
+
+///|
 fn parse_comments(
   json : Json,
   pr_repo : String,

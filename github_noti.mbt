@@ -37,49 +37,30 @@ pub(all) struct Comment {
 }
 
 ///|
+pub fn Comment::notifiable_comment(self : Comment) -> String {
+  let body = self.body
+    .replace_all(old="\n", new="")
+    .replace_all(old="\r", new="")
+    .replace_all(old="\t", new="")
+    .replace_all(old=" ", new="")
+
+  let body_length = if body.length() > 256 { 256 } else { body.length() }
+  let body = try? body[0:body_length]
+  body
+  .map(st => st.to_string())
+  .unwrap_or_else(() => "failed to extract comment body".to_string())
+}
+
+///|
 pub(all) struct AppState {
   mut comments : Array[Comment]
   mut pull_requests : Array[PullRequest]
-  mut cursor : Int
-  mut scroll_offset : Int
-  mut show_read : Bool
   mut my_login : String
 }
 
 ///|
 pub fn AppState::new() -> AppState {
-  {
-    comments: [],
-    pull_requests: [],
-    cursor: 0,
-    scroll_offset: 0,
-    show_read: true,
-    my_login: "",
-  }
-}
-
-///|
-pub fn AppState::adjust_scroll(self : AppState, visible_height : Int) -> Unit {
-  if self.cursor < self.scroll_offset {
-    self.scroll_offset = self.cursor
-  }
-  if self.cursor >= self.scroll_offset + visible_height {
-    self.scroll_offset = self.cursor - visible_height + 1
-  }
-}
-
-///|
-pub fn AppState::visible_comments(self : AppState) -> Array[Comment] {
-  if self.show_read {
-    self.comments
-  } else {
-    self.comments.filter(fn(c) { not(c.read) })
-  }
-}
-
-///|
-pub fn AppState::unread_count(self : AppState) -> Int {
-  self.comments.fold(init=0, fn(acc, c) { if c.read { acc } else { acc + 1 } })
+  { comments: [], pull_requests: [], my_login: "" }
 }
 
 ///|
@@ -115,19 +96,17 @@ pub fn comment_from_json(json : Json) -> Comment? {
         { "read": True, .. } => true
         _ => false
       }
-      Some(
-        {
-          id: id.to_int64(),
-          pr_repo,
-          pr_number: pr_number.to_int(),
-          pr_title,
-          pr_url,
-          author,
-          body,
-          created_at,
-          read,
-        },
-      )
+      Some({
+        id: id.to_int64(),
+        pr_repo,
+        pr_number: pr_number.to_int(),
+        pr_title,
+        pr_url,
+        author,
+        body,
+        created_at,
+        read,
+      })
     }
     _ => None
   }
@@ -193,10 +172,7 @@ pub fn load_exclude_patterns(text : String) -> Array[String] {
 }
 
 ///|
-pub fn is_comment_excluded(
-  c : Comment,
-  patterns : Array[String],
-) -> Bool {
+pub fn is_comment_excluded(c : Comment, patterns : Array[String]) -> Bool {
   for p in patterns {
     if c.author.contains(p) || c.body.contains(p) {
       return true
@@ -218,11 +194,7 @@ pub fn filter_comments(
 
 ///|
 pub fn load_state_from_json(text : String, state : AppState) -> Unit {
-  let json = try {
-    @json.parse(text)
-  } catch {
-    _ => return
-  }
+  let json = @json.parse(text) catch { _ => return }
   match json {
     { "my_login": String(login), .. } => state.my_login = login
     _ => ()

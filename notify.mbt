@@ -1,6 +1,13 @@
 ///|
 pub async fn send_notification_cmux(title : String, body : String) -> Unit {
-  let _ = @process.run("cmux", ["notify", "--title", title, "--body", body][:])
+  let exit_code = @process.run("cmux", [
+    "notify", "--title", title, "--body", body,
+  ])
+
+  if exit_code != 0 {
+    println("Failed to send notification with cmux, falling back to osascript")
+    send_notification_osascript(title, body)
+  }
 }
 
 ///|

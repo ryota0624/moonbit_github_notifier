@@ -1,6 +1,6 @@
 # github_noti
 
-自分が関わるGitHub PRへのコメントをターミナルで一覧管理し、デスクトップ通知する常駐アプリ。
+自分が関わるGitHub PRへのコメントを監視し、デスクトップ通知する常駐アプリ。
 
 ## 前提条件
 
@@ -25,6 +25,9 @@ moon run cmd/main --target js -- owner/repo1 owner/repo2
 
 # cmux notify で通知（osascript の代わり）
 moon run cmd/main --target js -- --cmux owner/repo
+
+# 30秒間隔で監視
+moon run cmd/main --target js -- --interval 30 owner/repo
 ```
 
 引数に監視したいリポジトリを `owner/repo` 形式で指定します。
@@ -36,7 +39,7 @@ moon run cmd/main --target js -- --cmux owner/repo
 | `--cmux` | 通知に `cmux notify` コマンドを使用（デフォルトは osascript） |
 | `--dump <file>` | GitHub APIから取得したデータをJSONファイルに保存 |
 | `--load <file>` | JSONファイルからデータを読み込んで表示（GitHub API不要） |
-| `--exclude <file>` | 除外パターンファイルを指定（表示・通知の両方に適用） |
+| `--exclude <file>` | 除外パターンファイルを指定（通知から除外） |
 | `--interval <sec>` | ポーリング間隔を秒で指定（デフォルト: 60） |
 
 ### データのダンプとロード
@@ -47,13 +50,13 @@ moon run cmd/main --target js -- --cmux owner/repo
 # GitHub APIからデータを取得しつつファイルに保存
 moon run cmd/main --target js -- --dump data.json owner/repo
 
-# 保存したファイルからTUIを起動（GitHub API不要、リポジトリ引数も不要）
+# 保存したファイルから起動（GitHub API不要、リポジトリ引数も不要）
 moon run cmd/main --target js -- --load data.json
 ```
 
 ### 除外パターン
 
-テキストファイルに1行ずつ除外パターンを記述します。コメントの `author` または `body` にパターンが含まれていれば、表示と通知の両方から除外されます。`#` で始まる行はコメントとして無視されます。
+テキストファイルに1行ずつ除外パターンを記述します。コメントの `author` または `body` にパターンが含まれていれば通知から除外されます。`#` で始まる行はコメントとして無視されます。
 
 ```
 # exclude.txt の例
@@ -74,17 +77,32 @@ moon run cmd/main --target js -- --exclude exclude.txt owner/repo
 - 自分がレビュアーのPR
 - 自分がアサイニーのPR
 
-## キー操作
+## 返信漏れ通知
 
-| キー | 操作 |
-|------|------|
-| `j` / `↓` | カーソルを下に移動 |
-| `k` / `↑` | カーソルを上に移動 |
-| `r` | 選択中のコメントを既読にする |
-| `R` | 全コメントを既読にする |
-| `o` | 選択中のコメントのPRをブラウザで開く |
-| `f` | 表示切替（全て / 未読のみ） |
-| `q` / `Ctrl+C` | 終了 |
+ポーリング時に返信漏れ（自分が返信すべきコメント）を検知し、デスクトップ通知を送ります。
+
+### 検知ルール
+
+| 条件 | 返信漏れと判定 |
+|------|--------------|
+| 自分がAuthorのPR | 最後のコメントが他人 |
+| 自分がAssigneeのPR | 最後のコメントが他人 |
+| 自分がReviewerのPR | 自分がコメント済み かつ 最後のコメントが他人 |
+| その他（roleなし） | 自分がコメント済み かつ 最後のコメントが他人 |
+
+同じコメントに対する返信漏れ通知は、一度通知されると再通知されません（プロセス起動中）。
+
+### テスト用トリガー
+
+自分自身が PR に `missing` を含むコメントを投稿すると、返信漏れ通知がトリガーされます。通知パイプラインの動作確認に利用できます。
+
+## デバッグ
+
+環境変数 `DEBUG=true` で詳細ログを出力します。
+
+```bash
+DEBUG=true moon run cmd/main --target js -- owner/repo
+```
 
 ## データ保存
 
@@ -92,4 +110,4 @@ moon run cmd/main --target js -- --exclude exclude.txt owner/repo
 
 ## ポーリング
 
-起動後、60秒間隔でGitHub APIをポーリングし、新規コメントがあればデスクトップ通知を表示します。
+起動後、指定間隔（デフォルト60秒）でGitHub APIをポーリングし、新規コメントや返信漏れがあればデスクトップ通知を表示します。
