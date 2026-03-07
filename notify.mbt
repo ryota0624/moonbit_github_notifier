@@ -1,5 +1,10 @@
 ///|
-pub async fn send_notification(title : String, body : String) -> Unit {
+pub async fn send_notification_cmux(title : String, body : String) -> Unit {
+  let _ = @process.run("cmux", ["notify", "--title", title, "--body", body][:])
+}
+
+///|
+pub async fn send_notification_osascript(title : String, body : String) -> Unit {
   let escaped_body = body
     .replace_all(old="\\", new="\\\\")
     .replace_all(old="\"", new="\\\"")

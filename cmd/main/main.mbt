@@ -2,11 +2,16 @@
 async fn main {
   let args = @env.args()
   let repos : Array[String] = []
+  let mut use_cmux = false
   for i in 1..<args.length() {
-    repos.push(args[i])
+    if args[i] == "--cmux" {
+      use_cmux = true
+    } else {
+      repos.push(args[i])
+    }
   }
   if repos.is_empty() {
-    println("Usage: github_noti <owner/repo> [<owner/repo> ...]")
+    println("Usage: github_noti [--cmux] <owner/repo> [<owner/repo> ...]")
     @sys.exit(1)
   }
   let state = @lib.AppState::new()
@@ -42,7 +47,17 @@ async fn main {
         let new_count = state.comments.length()
         if new_count > old_count {
           let diff = new_count - old_count
-          @lib.send_notification("GitHub PR Notifier", "\{diff} new comment(s)")
+          if use_cmux {
+            @lib.send_notification_cmux(
+              "GitHub PR Notifier",
+              "\{diff} new comment(s)",
+            )
+          } else {
+            @lib.send_notification_osascript(
+              "GitHub PR Notifier",
+              "\{diff} new comment(s)",
+            )
+          }
         }
         @tui.print_raw(app.render_frame(render_ui()))
       }
