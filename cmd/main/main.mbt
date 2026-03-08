@@ -34,6 +34,7 @@ async fn main {
   } else {
     []
   }
+  println("exclude patterns: \{exclude_patterns}")
   let state = @lib.AppState::new()
   if load_file.length() > 0 {
     let data = @fs.read_file(load_file)
@@ -122,7 +123,7 @@ async fn run_watch(
       unread.push(c)
     }
   }
-  let initial_missed = collect_missed(state, notified_missed_ids)
+  let initial_missed = collect_missed(state, notified_missed_ids, exclude_patterns)
   log_event_block(unread, initial_missed)
   send_notification(unread, initial_missed, use_cmux)
   for {
@@ -143,7 +144,7 @@ async fn run_watch(
         log_debug("skipped (known): \{c.pr_repo}#\{c.pr_number} @\{c.author}")
       }
     }
-    let missed_items = collect_missed(state, notified_missed_ids)
+    let missed_items = collect_missed(state, notified_missed_ids, exclude_patterns)
     log_event_block(new_items, missed_items)
     send_notification(new_items, missed_items, use_cmux)
   }
@@ -214,10 +215,12 @@ async fn fetch_all_comments_for_missed(
 async fn collect_missed(
   state : @lib.AppState,
   notified_missed_ids : Map[Int64, Bool],
+  exclude_patterns : Array[String],
 ) -> Array[@lib.MissedReply] {
   let all_comments = fetch_all_comments_for_missed(state)
+  let filtered_comments = @lib.filter_comments(all_comments, exclude_patterns)
   let missed = @lib.detect_missed_replies(
-    all_comments,
+    filtered_comments,
     state.pull_requests,
     state.my_login,
   )
